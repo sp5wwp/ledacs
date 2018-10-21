@@ -1,0 +1,5 @@
+1. może jakiś kompander na wyjściu audio
+2. bardziej skomplikowane filtrowanie grup dorobić, priorytety etc.
+3. dekodowanie pełnej drugiej paczki danych?
+
+4. przekazywanie numeru CC zeby sie do niego nie dostrajac

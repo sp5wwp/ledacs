@@ -1,0 +1,283 @@
+                             INTRODUCTION
+
+     This posting gives a rather sketchy summary of the operation of
+Ericsson GE's EDACS trunked radio control channel, describes an op amp
+interface that connects between your PC compatible's serial port and
+your radio scanner's discriminator, and lastly includes a C program
+listing that decodes and displays the trunked radio system activity on
+your screen. This single op amp interface along with some slight program
+modifications described later will allow one to construct an "EDACS
+TrunkTracker" that passes active working frequencies to your scanner,
+automatically detects the end of voice transmissions (incidentally also
+eliminating the anti-scanner tones), and returns to the control channel
+to await the next frequency assignment.
+
+     It is hoped that someone else will be able to pick up the ball,
+correct the inevitable misconceptions and errors in this posting, and
+develop a much nicer feature laden package (as has happened with the
+trunker program for monitoring Motorola's trunked radio control
+channel). As with the original trunker program posting, anyone who so
+desires should feel free to take anything useful from this posting in
+developing their own freeware / shareware / whatever product.
+
+
+---------------------------------------------------------------------
+
+                     EDACS Control Channel Information
+
+
+
+Modulation  : It looks like GMSK (Gaussian Minimum Shift Keying) which
+              is basically the same thing as two level FSK keying except
+              that the data stream is passed through a low pass filter
+              before modulating the carrier. This reduces the high
+              frequency components allowing the control channel to fit
+              within a 12.5KHz channel. Accordingly, a simple
+              data-slicer circuit can be used to receive the control
+              channel information.
+
+
+Baud Rate   : 9600 Baud
+
+
+Frame Sync  : Frame synchronization is achieved by sending the following
+              48 bit sequence:
+
+                010101010101010101010111000100100101010101010101
+
+              or
+
+                0x555557125555 Hexadecimal
+
+
+Data Frames : After transmission of the frame synchronization sequence
+              TWO data frames will be transmitted and then the whole
+              cycle repeats ad infinitum. Each data frame is 120 bits
+              long; this means 288 bits are transmitted in each cycle
+              (2x120 bits for the data frames and 48 bits for frame
+              sync).
+
+              Each data frame consists of 40 bits of information
+              transmitted three times in a row. In the second
+              transmission the data is inverted. This seems to serve as
+              some sort of primitive error correction scheme - in case
+              of a receive error one may assume that the one bit that
+              doesn't match the other two is bad.
+
+              The 40 information bits in each data frame seem to have
+              the following functions:
+
+                   Bits        Function
+                   -------     ----------------------------------------
+                    0 - 7   :  These eight bits are the command bits
+                    8 - 12  :  Logical channel number
+                     13     :  Status bit
+                     14     :  Status bit
+                     15     :  Status bit
+
+                     16     :  Status bit; guess at possible use:
+                                 group call if set to zero, individual
+                                 call if set to one (radio ID then is
+                                 given by bits 17 - 27)
+                   17 - 19  :  Agency   ID (3 bits) for group call
+                   20 - 23  :  Fleet    ID (4 bits) for group call
+                   24 - 27  :  Subfleet ID (4 bits) for group call
+                   28 - 39  :  Error detection polynomial
+
+              The above tentative table seems to work well for the few
+              systems the I have monitored. The exact use of the status
+              bits are at present unknown to the me. The basic call
+              type in an EDACS system is a group call, although
+              individual radios IDs can also be sent for such tasks as a
+              phone patch.
+
+
+Commands :    The few commands the I have figured out are:
+
+                       CMD     Function
+                       ---     --------------------------------------
+                       A0h  :  Data channel assignment
+                       A1h  :  Data channel assignment
+                       ECh  :  Phone patch channel assigment
+                       EEh  :  Voice channel assignment
+                       FCh  :  IDLE
+                       FDh  :  ID bits give system ID; don't know if
+                               status bits should be part of system ID
+
+              There must be a number of additional commands for such
+              tasks as dynamic regrouping or disabling radios.
+
+-----------------------------------------------------------------------
+
+                  A few words about those digital data
+                 transmissions you might sometimes hear
+
+
+     It would be of interest to be able to monitor those digital data
+transmissions that can be an integral part of some EDACS systems. This
+program is a first step in that direction since it allows one to
+determine when and on which channels these transmissions take place.
+These transmissions take place at 9600 baud and can be monitored with
+the same interface used for the control channel. The following
+information was gathered from monitoring the data transmissions on a
+single commercial SMR trunk (unknown use), some of it might be relevant
+to other systems.
+
+The first part of the transmission consists of 144 bit frames. The first
+48 bits are the following frame sync sequence:
+
+            000101010101010101010111100100100101010101010101
+            
+            or
+            
+            0x155557925555
+
+The next 96 bits are 4 bytes encoded as follows: byte number one is sent
+three times in a row (all bits inverted the second time), then bytes two
+through four follow similarly. The same frame is repeated a number of
+times, presumably to allow enough time for radios to switch to the data
+channel and achieve bit and frame synchronization. During this period
+the transmitted bytes are 0xD4, 0x00, 0x1A, and 0x33; presumably
+indicating an idle / background state. After enough time has elapsed,
+the four bytes are changed to indicate that actual data follows. For all
+the messages I have monitored these bytes are 0xC4, 0x00, 0x18, and
+0xF2; presumably indicating what type of data follows. At this point the
+actual data transmission starts, the frame sync sequence will not be
+sent until after the actual data transmission is complete. The first
+part of the data tranmission consists of two 40 bit blocks, each
+transmitted three times with all bits inverted the second time around.
+Next, 72 bytes are transmitted - each byte is sent twice (not three
+times) with all bits inverted the second time. Some additional
+redundancy is built since the first 27 bytes are always the same as the
+last 27 bytes. Since this concludes the actual data transmission the
+system starts transmitting the background / idle 144 bit frame again.
+For this system the idle frame is sent maybe a dozen times, then a frame
+containing data bytes 0x9A, 0xAA, 0xA2, 0xC0 is transmitted about 6
+times; presumably commanding the radio to return to the control channel.
+
+
+------------------------------------------------------------------------
+
+                  Things you need to know before you
+                can make your own "EDACS TrunkTracker"
+
+
+     There are a few problems that need to be worked out before the
+interested reader could actually build his or her own "EDACS
+TrunkTracker". First, the EDACS system refers to channels in the trunked
+system by logical channel numbers which cannot be directly converted
+into megahertz. One therefore must have a table translating logical
+channel numbers into an actual frequencies for each EDACS system one
+plans to monitor. The easy way to get this table seems to be by
+monitoring the control channel activity with one scanner while using a
+second scanner to figure out which frequency always becomes active in
+step with which logical channel number.
+
+     The interested reader will also have to figure out how to determine
+when the transmission is finished on a particular frequency so that the
+scanner can be sent back to the control channel. If you have several
+scanners you might want to dedicate one to continuously monitor the
+control channel while a second scanner is sent to active frequencies.
+The advantage here is that you will immediately know that the party you
+are monitoring has stopped transmitting or jumped to a new frequency
+since the appropriate ID has either disappeared or gone to a new channel
+number in the control channel data stream. For those who would prefer to
+use a single scanner: one could low pass filter the raw discriminator
+audio output and detect the presence of the subaudible data stream. Your
+scanner should return to the control channel once this data stream
+terminates. Simplest of all, one can look for the 9600 baud dotting
+sequence (the long series of 10101010101010... which comes out as a
+4800Hz tone) that always seems to be sent at the end of each voice
+transmission with the same interface used to monitor the control
+channel. This dotting sequence is sent before, after, and in between the
+anti-scanner tones. My experience is that the program will detect
+this dotting sequence reliably and quickly enough to completely
+eliminate the anti-scanner tones.
+
+     Finally, one quickly tires of listening to the control channel
+during idle periods using the single scanner setup. The interested
+reader may want to use some of the serial port handshaking lines as an
+external mute control instead of supplying power to the op amp
+interface.
+
+     In summary, the reader should be able to monitor control channel
+activity without having to make any changes to the supplied program. If
+one wants to start experimenting with "trunktracking" an EDACS system,
+the reader will have to hook the serial port TxD line up to a scanner
+with any necessary level translation circuitry, place some code into
+subroutine set_freak that sends the correct sequence of bytes to your
+scanner telling it to change frequencies, uncomment a few sections of
+code in subroutine show_active, make sure all serial port parameters are
+set correctly (these are the baudrate and the parameters in routine
+set8250), place a translation table relating logical channel numbers
+with actual frequencies for the specific system you plan to monitor into
+array chan[], and tell the program on which logical number the control
+channel happens to be. With these changes the program will jump to any
+active channel (without regard to the group ID) and jump back to the
+control channel when the dotting sequence is detected or any key other
+than space or escape is pressed. Improvements are an excercise left for
+the reader.
+
+
+------------------------------------------------------------------------
+
+                             THE PROGRAM
+
+     Windows users beware: this program will probably only work running
+from DOS. This is because Windows may interfere with the program's low
+level access to your computer's hardware and disrupt the exacting timing
+needed to decode the incoming data.
+
+     This paragraph gives a short description of how the program works.
+Every time the incoming data stream from your scanner changes state, the
+op amp data slicer's output also changes polarity. Each time this
+happens an interrupt is generated since the data slicer is connected to
+one of the serial port status lines. The interrupt handler (comint)
+stores the number of system timer clock ticks since the last interrupt
+and the data line polarity in a buffer. The main program extracts a raw
+bit stream from this buffer by synchronizing a 9600 baud receive "clock"
+with the the timing of the transitions and then looking at the data
+polarity halfway between the bit transitions. This raw bit stream is
+passed on to the frame_sync routine. In addition to checking for the
+dotting sequence, routine frame_sync examines this raw bit stream and
+extracts the actual data frames which are sent to routine proc_frame
+which peforms the error correcting on the raw data. Routine proc_frame
+passes its data on to routine proc_cmd which does the CRC check and
+formats the received data. The output of proc_cmd is a stream of raw
+control channel commands which are sent to routine show. Routine show
+figures out changes in system activity. It informs other routines when a
+group becomes active and on which channel (routine show_active) or when
+a channel is no longer active (routine show_inactive). Currently these
+other routines only format and display this data on the screen.
+
+     On start up the program quickly checks to see if any data is coming
+from the interface. If none is detected it will inform the user of the
+problem upon termination. If the interface is working properly the
+program immediately starts trying to decode the control channel
+information and will also automatically determine the polarity of the
+incoming data. When it has locked onto the incoming data the spinwheel
+in the upper right hand corner of the screen should start spinning. If
+that doesn't happen: make sure you're actually sitting on an EDACS
+control channel, see if your interface works with other decoding
+packages such as the PD203 POCSAG pager decoder shareware, and if all
+else fails look at your discriminator and interface outputs with an
+oscilloscope to make sure the data getting into your computer looks like
+a relatively clean 9600 baud waveform. You can use a command line option
+to tell the program which COM port to use ("/COM:y" where y is the COM
+port number) and how many channels are used in your EDACS system
+("/NC:x" where x is the number of channels), although there is no real
+reason not to leave the default number of channels at 20.
+
+     Compiling the program: snip out bottom portion of this posting,
+save it to a file, and feed it into your C compiler with appropriate
+settings for a program that uses low level interrupts (in my Borland
+Turbo C compiler one should disable the "use register variables"
+optimization and the stack warning). The program will definitely compile
+with Turbo and Borland C compilers.
+
+The actual program listing is given in the second posting.
+
+Sorry if I'm wasting bandwidth but I don't have a web page where I
+could have put this stuff for interested parties to download. If anyone
+wants to try to contact me send email to "qwertyuiop10@juno.com"; but
+please keep in mind that I cannot promise a reply.
